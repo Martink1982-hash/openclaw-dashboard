@@ -77,11 +77,19 @@ export async function GET() {
 }
 
 async function buildLiveData(): Promise<DashboardData> {
-  console.log("[dashboard] buildLiveData start - using live OpenClaw API data (not generated files)");
+  console.log("[dashboard] buildLiveData start");
+  
+  // FIRST PRIORITY: Check for pre-generated data file (works on Netlify)
+  const preGeneratedData = await tryLoadPreGeneratedData();
+  if (preGeneratedData) {
+    console.log("[dashboard] ✓ Pre-generated data file found and loaded successfully");
+    return preGeneratedData;
+  }
+  
+  console.log("[dashboard] ⚠ Pre-generated data file not found, falling back to live OpenClaw CLI");
   const snapshot = JSON.parse(JSON.stringify(placeholderData)) as DashboardData;
 
-  // LIVE MODE: Always fetch from OpenClaw CLI directly
-  // Ignore generated-data.json files (if they exist) to ensure fresh data from the running installation
+  // FALLBACK MODE: Fetch from OpenClaw CLI directly (for local development)
   console.log("[dashboard] Fetching live data from OpenClaw CLI (agents, crons, etc.)");
 
   const [agents, projects, crons, trading] = await Promise.all([
@@ -130,6 +138,40 @@ async function buildLiveData(): Promise<DashboardData> {
   console.log(`[dashboard] buildLiveData completed. Live data applied: ${liveDataApplied}`);
 
   return snapshot;
+}
+
+async function tryLoadPreGeneratedData(): Promise<DashboardData | null> {
+  // Try multiple paths where pre-generated data might be located
+  const candidatePaths = [
+    // Netlify build output path (.next/server is server-side build output)
+    path.join(process.cwd(), ".next", "server", "generated-data.json"),
+    // Source data path (used during local dev)
+    path.join(process.cwd(), "data", "generated-data.json"),
+    // Fallback: user's home directory (for edge cases)
+    path.join(os.homedir(), "clawd", "openclaw-dashboard", "data", "generated-data.json"),
+  ];
+
+  for (const filePath of candidatePaths) {
+    try {
+      console.log(`[dashboard] tryLoadPreGeneratedData: checking ${filePath}`);
+      await fs.access(filePath);
+      
+      console.log(`[dashboard] tryLoadPreGeneratedData: found at ${filePath}, loading...`);
+      const fileContent = await fs.readFile(filePath, "utf-8");
+      const data = JSON.parse(fileContent) as DashboardData;
+      
+      console.log(`[dashboard] tryLoadPreGeneratedData: ✓ successfully loaded and parsed`);
+      return data;
+    } catch (error) {
+      // File doesn't exist or can't be read, try next path
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.debug(`[dashboard] tryLoadPreGeneratedData: ${filePath} not available (${errorMsg.split("\n")[0]})`);
+      continue;
+    }
+  }
+
+  console.log("[dashboard] tryLoadPreGeneratedData: no pre-generated data file found in any candidate path");
+  return null;
 }
 
 async function fetchAgentData(): Promise<DashboardData["agents"] | null> {
