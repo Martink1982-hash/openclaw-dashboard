@@ -80,10 +80,30 @@ async function buildLiveData(): Promise<DashboardData> {
   console.log("[dashboard] buildLiveData start");
   const snapshot = JSON.parse(JSON.stringify(placeholderData)) as DashboardData;
 
+  // Try to use generated data file on Netlify
+  const generatedDataPath = path.join(process.cwd(), "data", "generated-data.json");
+  let hasGeneratedData = false;
+  
+  try {
+    const generatedDataContent = await fs.readFile(generatedDataPath, 'utf-8');
+    const generatedData = JSON.parse(generatedDataContent) as DashboardData;
+    console.log("[dashboard] Using generated data from", generatedDataPath);
+    // Apply generated agents and crons
+    if (generatedData.agents?.length) {
+      snapshot.agents = generatedData.agents;
+      hasGeneratedData = true;
+    }
+    if (generatedData.crons?.jobs?.length) {
+      snapshot.crons = generatedData.crons;
+    }
+  } catch (error) {
+    console.debug("[dashboard] No generated data available:", error instanceof Error ? error.message : error);
+  }
+
   const [agents, projects, crons, trading] = await Promise.all([
-    fetchAgentData(),
+    hasGeneratedData ? Promise.resolve(null) : fetchAgentData(),
     fetchGitHubProjects(),
-    fetchCronStatus(),
+    hasGeneratedData ? Promise.resolve(null) : fetchCronStatus(),
     fetchB2LData(),
   ]);
 

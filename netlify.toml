@@ -1,0 +1,20 @@
+[build]
+command = "npm run generate-data && npm run build"
+publish = ".next"
+functions = "."
+
+[functions]
+# Enable serverless functions in the .next directory
+external_node_modules = ["next"]
+
+[[redirects]]
+from = "/api/*"
+to = "/.next/server/:splat"
+status = 200
+
+[env.production]
+# Production environment variables can be set in Netlify dashboard
+# Set OPENCLAW_DATA_PATH to the generated data file during build
+
+[[edge_functions]]
+# No edge functions needed - use serverless functions

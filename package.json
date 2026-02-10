@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "generate-data": "node scripts/generate-live-data.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
