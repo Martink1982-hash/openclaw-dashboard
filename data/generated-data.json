@@ -4,8 +4,8 @@
       "name": "Clawd",
       "state": "Active",
       "sessions": 137,
-      "tokens": 3296064,
-      "cost": 86.6865,
+      "tokens": 3337268,
+      "cost": 87.7701,
       "model": "anthropic/claude-haiku-4-5",
       "tasks": []
     }
@@ -115,7 +115,7 @@
       {
         "name": "WhatsApp to Telegram bridge",
         "status": "ok",
-        "nextRun": "2026-02-10T16:50:38.226Z",
+        "nextRun": "2026-02-10T16:51:38.226Z",
         "lastRun": "2026-02-10T16:49:38.239Z"
       },
       {
