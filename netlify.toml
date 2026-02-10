@@ -11,10 +11,3 @@ external_node_modules = ["next"]
 from = "/api/*"
 to = "/.next/server/:splat"
 status = 200
-
-[env.production]
-# Production environment variables can be set in Netlify dashboard
-# Set OPENCLAW_DATA_PATH to the generated data file during build
-
-[[edge_functions]]
-# No edge functions needed - use serverless functions
