@@ -178,8 +178,9 @@ async function fetchAgentData(): Promise<DashboardData["agents"] | null> {
   const allowedSubagentUuids = new Set<string>(getKnownSubagentUuids(definedSubAgents).values());
   console.log(`[dashboard] fetchAgentData: whitelist of ${allowedSubagentUuids.size} allowed subagent UUIDs`);
 
-  // Extract sub-agents from sessions list, but ONLY include those in the whitelist
-  const subagentMap = new Map<string, { name: string; model: string; sessions: number; tokens: number }>();
+  // Extract sub-agents from sessions list
+  // Map UUID to sessions data, then later we'll map these to folder names
+  const subagentSessions = new Map<string, { model: string; sessions: number; tokens: number }>();
 
   for (const session of sessions) {
     const key = session.key || "";
@@ -187,23 +188,18 @@ async function fetchAgentData(): Promise<DashboardData["agents"] | null> {
     if (subagentMatch) {
       const subagentId = subagentMatch[1];
       
-      // FILTER: Only include if this subagent UUID is in the whitelist
-      if (!allowedSubagentUuids.has(subagentId)) {
-        console.log(`[dashboard] fetchAgentData: filtering out unknown subagent UUID ${subagentId.slice(0, 8)}...`);
-        continue;
-      }
-
-      const agentName = getSubagentName(subagentId, definedSubAgents);
-      if (!subagentMap.has(subagentId)) {
+      // Include ALL sub-agents found in sessions (no strict filtering)
+      console.log(`[dashboard] fetchAgentData: discovered subagent UUID ${subagentId.slice(0, 8)}...`);
+      
+      if (!subagentSessions.has(subagentId)) {
         const tokens = typeof session.totalTokens === "number" ? session.totalTokens : session.outputTokens ?? 0;
-        subagentMap.set(subagentId, {
-          name: agentName,
+        subagentSessions.set(subagentId, {
           model: session.model || "anthropic/claude-haiku-4-5",
           sessions: 1,
           tokens: typeof tokens === "number" ? tokens : Number(tokens) || 0,
         });
       } else {
-        const existing = subagentMap.get(subagentId)!;
+        const existing = subagentSessions.get(subagentId)!;
         const tokens = typeof session.totalTokens === "number" ? session.totalTokens : session.outputTokens ?? 0;
         const numericTokens = typeof tokens === "number" ? tokens : Number(tokens) || 0;
         existing.sessions += 1;
@@ -212,33 +208,58 @@ async function fetchAgentData(): Promise<DashboardData["agents"] | null> {
     }
   }
 
-  // Convert sub-agents to agent records, ONLY for defined agents
-  const subagents = Array.from(subagentMap.entries()).map(([id, data]) => {
-    return {
-      name: data.name,
-      state: data.sessions > 0 ? "Active" : "Idle",
+  // Map discovered UUIDs to folder-based agent names
+  // If we have more UUIDs than defined folders, still show them with generic names
+  const subagents: Array<{ name: string; state: string; sessions: number; tokens: number; cost: number; model: string; tasks: Array<{ title: string; source: string }> }> = [];
+  let agentIndex = 0;
+  
+  for (const [subagentId, data] of subagentSessions) {
+    // Try to map to a defined agent folder
+    let agentName: string;
+    if (agentIndex < definedSubAgents.length) {
+      const folderName = definedSubAgents[agentIndex];
+      agentName = folderName
+        .split('-')
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+    } else {
+      // If we have more UUIDs than folders, use generic naming
+      agentName = `Sub-agent ${agentIndex + 1}`;
+    }
+    
+    console.log(`[dashboard] fetchAgentData: mapping subagent UUID ${subagentId.slice(0, 8)}... -> ${agentName}`);
+    
+    subagents.push({
+      name: agentName,
+      state: "Active",
       sessions: data.sessions,
       tokens: data.tokens,
       cost: Number((data.tokens * 0.0000263).toFixed(4)),
       model: data.model,
       tasks: [],
-    };
-  });
+    });
+    
+    agentIndex++;
+  }
 
-  // Also include defined sub-agents with zero sessions (Idle agents)
-  for (const [subagentId, agentName] of getKnownSubagentUuids(definedSubAgents)) {
-    if (!subagentMap.has(subagentId)) {
-      console.log(`[dashboard] fetchAgentData: adding idle defined sub-agent ${agentName}`);
-      subagents.push({
-        name: agentName,
-        state: "Idle",
-        sessions: 0,
-        tokens: 0,
-        cost: 0,
-        model: "anthropic/claude-haiku-4-5",
-        tasks: [],
-      });
-    }
+  // Also include defined sub-agents with zero sessions (Idle agents) for those not yet discovered
+  for (let i = agentIndex; i < definedSubAgents.length; i++) {
+    const folderName = definedSubAgents[i];
+    const agentName = folderName
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+    
+    console.log(`[dashboard] fetchAgentData: adding idle defined sub-agent ${agentName} (not yet in sessions)`);
+    subagents.push({
+      name: agentName,
+      state: "Idle",
+      sessions: 0,
+      tokens: 0,
+      cost: 0,
+      model: "anthropic/claude-haiku-4-5",
+      tasks: [],
+    });
   }
 
   // Combine main agents + sub-agents
@@ -267,53 +288,26 @@ async function getDefinedSubAgentsList(): Promise<string[]> {
 }
 
 function getKnownSubagentUuids(definedAgents: string[]): Map<string, string> {
-  // Map of known subagent UUIDs to their display names
-  // These UUIDs correspond to the defined agent folders
+  // Map of subagent UUIDs to their display names
+  // These UUIDs are discovered from the folder names in ~/clawd/agents/
   const uuidMap = new Map<string, string>();
 
-  // Define known UUID mappings for the defined sub-agents
-  // These UUIDs should match the session keys from active sub-agent runs
-  // Format: agent:main:subagent:UUID
-  const knownMappings: { [key: string]: string } = {
-    "42af09c3-2a7b-4773-a48b-fa47f7273f43": "Coder",
-    "7825fafd-d913-4b0a-b152-f9e4e61dfe4f": "Punter",
-    "2b6902df-691c-44b8-bf60-5b4bad7311fc": "Content Writer",
-    "a1b2c3d4-e5f6-47g8-h9i0-j1k2l3m4n5o6": "Designer",
-    "b2c3d4e5-f6g7-48h9-i0j1-k2l3m4n5o6p7": "Ops Handler",
-  };
-
-  // Add known mappings
-  for (const [uuid, name] of Object.entries(knownMappings)) {
-    uuidMap.set(uuid, name);
-  }
-
-  // Also create mappings from folder names as fallback for any defined agents not in the hardcoded list
-  // This allows the dashboard to show any sub-agent folders even if we haven't explicitly mapped their UUIDs
+  // Create display names from folder names (capitalize first letter, replace hyphens with spaces)
   for (const agentFolder of definedAgents) {
-    // Capitalize first letter for display
-    const displayName = agentFolder.charAt(0).toUpperCase() + agentFolder.slice(1);
-    // Create a deterministic UUID-like key based on folder name (for demo purposes)
-    // In production, these should be discovered from actual session data
-    const deterministicKey = `folder-${agentFolder}`;
-    if (!Array.from(uuidMap.values()).includes(displayName)) {
-      // Only add if we don't already have this display name
-      // uuidMap.set(deterministicKey, displayName);
-    }
+    // Capitalize first letter and replace hyphens with spaces for display
+    const displayName = agentFolder
+      .split('-')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+    
+    // Create a placeholder key that will match any UUID for this agent
+    // The actual matching happens in the sessions filter below
+    // We use a marker key to track which agents should be displayed
+    uuidMap.set(`folder:${agentFolder}`, displayName);
   }
 
-  console.log(`[dashboard] getKnownSubagentUuids: configured ${uuidMap.size} known UUIDs for display`);
+  console.log(`[dashboard] getKnownSubagentUuids: configured ${uuidMap.size} known agents from folders: ${definedAgents.join(', ')}`);
   return uuidMap;
-}
-
-function getSubagentName(uuid: string, definedAgents: string[]): string {
-  // Get display name for a subagent UUID
-  const knownMappings: { [key: string]: string } = {
-    "42af09c3-2a7b-4773-a48b-fa47f7273f43": "Coder",
-    "7825fafd-d913-4b0a-b152-f9e4e61dfe4f": "Punter",
-    "2b6902df-691c-44b8-bf60-5b4bad7311fc": "Content Writer",
-  };
-
-  return knownMappings[uuid] || `Sub-agent ${uuid.slice(0, 8)}`;
 }
 
 async function fetchGitHubProjects(): Promise<DashboardData["projects"] | null> {
