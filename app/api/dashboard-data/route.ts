@@ -81,23 +81,38 @@ async function buildLiveData(): Promise<DashboardData> {
   const snapshot = JSON.parse(JSON.stringify(placeholderData)) as DashboardData;
 
   // Try to use generated data file on Netlify
-  const generatedDataPath = path.join(process.cwd(), "data", "generated-data.json");
+  // On Netlify, the file is copied to .next/server/generated-data.json during build
+  // On local dev, it's in data/generated-data.json
+  const possiblePaths = [
+    path.join(process.cwd(), ".next", "server", "generated-data.json"), // Netlify production
+    path.join(process.cwd(), "data", "generated-data.json"),             // Local dev
+    path.join(process.cwd(), "generated-data.json"),                     // Fallback
+  ];
+  
   let hasGeneratedData = false;
   
-  try {
-    const generatedDataContent = await fs.readFile(generatedDataPath, 'utf-8');
-    const generatedData = JSON.parse(generatedDataContent) as DashboardData;
-    console.log("[dashboard] Using generated data from", generatedDataPath);
-    // Apply generated agents and crons
-    if (generatedData.agents?.length) {
-      snapshot.agents = generatedData.agents;
-      hasGeneratedData = true;
+  for (const generatedDataPath of possiblePaths) {
+    try {
+      const generatedDataContent = await fs.readFile(generatedDataPath, 'utf-8');
+      const generatedData = JSON.parse(generatedDataContent) as DashboardData;
+      console.log("[dashboard] ✓ Using generated data from:", generatedDataPath);
+      // Apply generated agents and crons
+      if (generatedData.agents?.length) {
+        snapshot.agents = generatedData.agents;
+        hasGeneratedData = true;
+      }
+      if (generatedData.crons?.jobs?.length) {
+        snapshot.crons = generatedData.crons;
+      }
+      break; // Success, exit loop
+    } catch (error) {
+      // Continue to next path
+      continue;
     }
-    if (generatedData.crons?.jobs?.length) {
-      snapshot.crons = generatedData.crons;
-    }
-  } catch (error) {
-    console.debug("[dashboard] No generated data available:", error instanceof Error ? error.message : error);
+  }
+  
+  if (!hasGeneratedData) {
+    console.debug("[dashboard] No generated data available in any expected location");
   }
 
   const [agents, projects, crons, trading] = await Promise.all([

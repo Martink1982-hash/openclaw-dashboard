@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "generate-data": "node scripts/generate-live-data.js",
-    "build": "next build",
+    "build": "next build && node scripts/copy-data-to-build.js",
     "start": "next start",
     "lint": "eslint"
   },

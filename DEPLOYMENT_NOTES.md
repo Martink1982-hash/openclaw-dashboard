@@ -1,28 +1,42 @@
 # Dashboard Live Data - Netlify Deployment Fix
 
-## Problem
+## Problem (Fixed Feb 10, 2026)
 The dashboard was showing placeholder data on Netlify instead of live data because:
 - The API route tried to run `openclaw` CLI commands via `execFile()`
 - The Netlify build environment doesn't have the `openclaw` binary
-- CLI commands would fail silently, causing the API to fall back to placeholder data
+- Even with pre-build data generation, the file wasn't being deployed to Netlify
+  - `generated-data.json` was created in the project root
+  - But `netlify.toml` only publishes the `.next/` directory
+  - The API route couldn't find the file at runtime on Netlify
 
-## Solution
-Implemented a **pre-build data generation script** that:
-1. Runs on local machine before Netlify build
-2. Captures live OpenClaw data (agents, sessions, cron jobs)
-3. Saves to `data/generated-data.json`
-4. API route uses this pre-generated file on Netlify
+## Solution ✓
+Implemented a **3-step data pipeline**:
+1. **Pre-build data generation** (`scripts/generate-live-data.js`)
+   - Runs `openclaw` CLI commands locally before Netlify build
+   - Captures agents, sessions, cron jobs into `data/generated-data.json`
+
+2. **Post-build copy** (`scripts/copy-data-to-build.js`)
+   - Runs AFTER Next.js build completes
+   - Copies `generated-data.json` → `.next/server/generated-data.json`
+   - Ensures file is included in the published directory
+
+3. **Runtime API route** (`app/api/dashboard-data/route.ts`)
+   - Looks for data in `.next/server/generated-data.json` (Netlify)
+   - Falls back to `data/generated-data.json` (local dev)
+   - Falls back to live CLI calls if available
+   - Falls back to placeholder data if all else fails
 
 ## Files Modified/Created
 
 ### New Files
-- **`scripts/generate-live-data.js`** - Pre-build data generation script
+- **`scripts/generate-live-data.js`** - Pre-build data generation (runs before Next.js build)
+- **`scripts/copy-data-to-build.js`** - Post-build copy (runs after Next.js build) ✓ FIXED
 - **`netlify.toml`** - Netlify build configuration
 - **`DEPLOYMENT_NOTES.md`** - This file
 
 ### Modified Files
-- **`app/api/dashboard-data/route.ts`** - Updated to use generated data
-- **`package.json`** - Added `generate-data` script
+- **`app/api/dashboard-data/route.ts`** - Updated to check multiple paths for data file ✓ FIXED
+- **`package.json`** - Build script now includes post-build copy step ✓ FIXED
 - **`.gitignore`** - Ignores `generated-data.json`
 
 ## Build Process
@@ -31,17 +45,26 @@ Implemented a **pre-build data generation script** that:
 ```bash
 npm run dev
 ```
-- Uses live `openclaw` CLI commands
-- Real-time data updates every 30 seconds on the dashboard
+- Tries to read `data/generated-data.json` (if available)
+- Falls back to live `openclaw` CLI commands
+- Real-time data updates available
 
-### Netlify Build
+### Netlify Build (Build Command in netlify.toml)
 ```bash
 npm run generate-data && npm run build
 ```
-1. `generate-data` script runs OpenClaw CLI commands
-2. Captures agents, sessions, cron jobs into `data/generated-data.json`
-3. Netlify build proceeds with this data
-4. API route serves the pre-generated data
+
+**Step 1: Generate Data** (`generate-data` script)
+- Runs OpenClaw CLI commands locally
+- Captures agents, sessions, cron jobs into `data/generated-data.json`
+
+**Step 2: Build** (`next build` via package.json)
+- Next.js compiles app into `.next/` directory
+
+**Step 3: Copy Data** (post-build step in package.json) ✓ FIXED FEB 10
+- `copy-data-to-build.js` runs after Next.js build
+- Copies `data/generated-data.json` → `.next/server/generated-data.json`
+- This ensures the file is in the published directory
 
 ## Data Sources on Netlify
 
@@ -62,22 +85,34 @@ No special environment variables needed. The script auto-detects:
 
 **Issue:** Dashboard still shows placeholder data after deploy
 
-**Solution:** 
-1. Verify Netlify build logs show `[generate]` commands succeeded
-2. Check that `generate-data` runs before build in netlify.toml
-3. If OpenClaw service isn't running locally, pre-generate data manually:
+**Debug Checklist:**
+1. ✓ Check Netlify build logs for all three steps:
+   - `[generate]` commands output
+   - `next build` completed
+   - `[copy-data]` confirmation message
+2. ✓ Verify both files exist locally after build:
+   - `data/generated-data.json` (generated)
+   - `.next/server/generated-data.json` (copied)
+3. ✓ Test locally:
+   ```bash
+   npm run build
+   npm start  # Run production build locally
+   curl -u admin:openclaw http://localhost:3000/api/dashboard-data
+   ```
+4. ✓ If OpenClaw binary isn't available, ensure pre-generated data is committed:
    ```bash
    npm run generate-data
-   git commit data/generated-data.json
+   git add data/generated-data.json
    git push
    ```
 
 **Issue:** Generated data is stale
 
 **Solution:**
-1. The data is generated at build time
-2. For more frequent updates, rebuild the Netlify deployment
-3. Or manually trigger `npm run generate-data` before pushing
+1. Data is captured at build time
+2. To refresh: manually trigger `npm run generate-data && npm run build` locally, then push
+3. Or manually rebuild the Netlify deployment via the Netlify dashboard
+4. Or set up a scheduled build trigger in Netlify
 
 ## Performance Impact
 

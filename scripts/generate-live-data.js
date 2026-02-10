@@ -155,4 +155,5 @@ const liveData = generateData();
 
 fs.writeFileSync(outputPath, JSON.stringify(liveData, null, 2), 'utf-8');
 console.log(`[generate] ✓ Data written to ${outputPath}`);
+console.log('[generate] Note: Post-build step (copy-data-to-build.js) will copy this to .next/server/ after Next.js builds');
 console.log('[generate] Done!');

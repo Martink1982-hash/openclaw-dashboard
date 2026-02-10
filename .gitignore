@@ -40,5 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# generated data (created during build)
-/data/generated-data.json
+# generated data (created during build, but committed for Netlify fallback)
+# /data/generated-data.json - Now tracked in git for Netlify deployments
