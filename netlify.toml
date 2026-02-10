@@ -1,10 +1,10 @@
 [build]
 command = "npm run generate-data && npm run build"
 publish = ".next"
-functions = "."
+functions = "netlify/functions"
 
 [functions]
-# Enable serverless functions in the .next directory
+# Keep runtime dependencies bundled for Netlify Functions output
 external_node_modules = ["next"]
 
 [[redirects]]
