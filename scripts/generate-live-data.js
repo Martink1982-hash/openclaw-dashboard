@@ -57,12 +57,18 @@ function runCommand(cmd, label) {
 function generateData() {
   const openclawBinary = path.join(os.homedir(), '.openclaw', 'bin', 'openclaw');
   
+  console.log(`[generate] ========== generateData START ==========`);
+  console.log(`[generate] OpenClaw binary path: ${openclawBinary}`);
+  
   if (!fs.existsSync(openclawBinary)) {
-    console.warn(`[generate] OpenClaw binary not found at ${openclawBinary}`);
-    console.log('[generate] Using placeholder data');
+    console.warn(`[generate] ✗ OpenClaw binary NOT FOUND at ${openclawBinary}`);
+    console.log('[generate] This script runs at build time and needs access to the local OpenClaw CLI.');
+    console.log('[generate] If running on Netlify, OpenClaw is not available in the build environment.');
+    console.log('[generate] Fallback: Using placeholder data (this is expected on Netlify)');
     return placeholderData;
   }
 
+  console.log(`[generate] ✓ OpenClaw binary found, proceeding with live data fetch...`);
   const data = JSON.parse(JSON.stringify(placeholderData));
 
   // Fetch agents and sessions
@@ -151,9 +157,17 @@ function formatTimestamp(value) {
 
 // Main execution
 const outputPath = path.join(__dirname, '../data/generated-data.json');
+console.log(`[generate] Generating data now...`);
 const liveData = generateData();
 
 fs.writeFileSync(outputPath, JSON.stringify(liveData, null, 2), 'utf-8');
+const stats = fs.statSync(outputPath);
 console.log(`[generate] ✓ Data written to ${outputPath}`);
-console.log('[generate] Note: Post-build step (copy-data-to-build.js) will copy this to .next/server/ after Next.js builds');
-console.log('[generate] Done!');
+console.log(`[generate]   File size: ${stats.size} bytes`);
+console.log(`[generate]   Agents: ${liveData.agents.length}`);
+console.log(`[generate]   Cron jobs: ${liveData.crons?.jobs?.length ?? 0}`);
+console.log('[generate] ');
+console.log('[generate] IMPORTANT: Post-build step (copy-data-to-build.js) will copy this to .next/server/');
+console.log('[generate] This ensures the API route can access the data on Netlify and in production.');
+console.log('[generate] ');
+console.log('[generate] ========== generateData COMPLETE ==========');
