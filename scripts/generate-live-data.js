@@ -70,6 +70,7 @@ function withMetadata(data, metadata) {
   return {
     ...data,
     metadata,
+    __meta: metadata,
   };
 }
 
@@ -188,4 +189,5 @@ fs.writeFileSync(outputPath, JSON.stringify(snapshot, null, 2), 'utf-8');
 const stats = fs.statSync(outputPath);
 console.log(`[generate] ✓ Data written to ${outputPath}`);
 console.log(`[generate]   File size: ${stats.size} bytes`);
-console.log(`[generate]   Metadata: isFallback=${snapshot?.metadata?.isFallback}, generatedAt=${snapshot?.metadata?.generatedAt}`);
+const emittedMeta = snapshot?.__meta || snapshot?.metadata;
+console.log(`[generate]   Metadata: isFallback=${emittedMeta?.isFallback}, generatedAt=${emittedMeta?.generatedAt}`);

@@ -82,6 +82,7 @@ type PreGeneratedMeta = {
 };
 
 type PreGeneratedCandidate = DashboardData & {
+  metadata?: PreGeneratedMeta;
   __meta?: PreGeneratedMeta;
 };
 
@@ -105,26 +106,23 @@ function validatePreGeneratedSnapshot(rawData: unknown): ValidationResult {
   }
 
   const data = rawData as PreGeneratedCandidate;
-  const meta = data.__meta;
+  const meta = data.__meta ?? data.metadata;
+  const metaSource = data.__meta ? "__meta" : data.metadata ? "metadata" : "none";
 
   if (!meta || typeof meta !== "object") {
-    reasons.push("Missing __meta block");
-  }
-
-  if (meta?.isFallback !== false) {
-    reasons.push(`Expected __meta.isFallback === false, got ${String(meta?.isFallback)}`);
+    reasons.push("Missing metadata block (__meta or metadata)");
   }
 
   const generatedAt = typeof meta?.generatedAt === "string" ? meta.generatedAt : null;
   if (!generatedAt) {
-    reasons.push("Missing __meta.generatedAt");
+    reasons.push(`Missing ${metaSource}.generatedAt`);
   }
 
   let ageHours: number | null = null;
   if (generatedAt) {
     const generatedTime = new Date(generatedAt).getTime();
     if (!Number.isFinite(generatedTime)) {
-      reasons.push(`Invalid __meta.generatedAt timestamp: ${generatedAt}`);
+      reasons.push(`Invalid ${metaSource}.generatedAt timestamp: ${generatedAt}`);
     } else {
       ageHours = (Date.now() - generatedTime) / (1000 * 60 * 60);
       if (ageHours > PRE_GENERATED_MAX_AGE_HOURS) {
@@ -133,6 +131,11 @@ function validatePreGeneratedSnapshot(rawData: unknown): ValidationResult {
         );
       }
     }
+  }
+
+  const isFallback = typeof meta?.isFallback === "boolean" ? meta.isFallback : null;
+  if (isFallback === null) {
+    reasons.push(`Missing ${metaSource}.isFallback`);
   }
 
   if (!Array.isArray(data.agents)) {
