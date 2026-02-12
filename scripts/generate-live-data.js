@@ -13,6 +13,17 @@ const os = require('os');
 
 const placeholderData = require('../data/dashboard-data.json');
 
+function withMeta(data, meta) {
+  return {
+    ...data,
+    __meta: {
+      generatedAt: new Date().toISOString(),
+      isFallback: false,
+      ...meta,
+    },
+  };
+}
+
 function runCommand(cmd, label) {
   try {
     console.log(`[generate] Running: ${cmd}`);
@@ -56,16 +67,26 @@ function runCommand(cmd, label) {
 
 function generateData() {
   const openclawBinary = path.join(os.homedir(), '.openclaw', 'bin', 'openclaw');
+  const isProductionBuild = process.env.NODE_ENV === 'production';
   
   console.log(`[generate] ========== generateData START ==========`);
   console.log(`[generate] OpenClaw binary path: ${openclawBinary}`);
   
   if (!fs.existsSync(openclawBinary)) {
-    console.warn(`[generate] ✗ OpenClaw binary NOT FOUND at ${openclawBinary}`);
-    console.log('[generate] This script runs at build time and needs access to the local OpenClaw CLI.');
-    console.log('[generate] If running on Netlify, OpenClaw is not available in the build environment.');
-    console.log('[generate] Fallback: Using placeholder data (this is expected on Netlify)');
-    return placeholderData;
+    const message = `[generate] ✗ OpenClaw binary NOT FOUND at ${openclawBinary}`;
+    console.warn(message);
+
+    if (isProductionBuild) {
+      console.error('[generate] ERROR: Refusing placeholder fallback for production build without OpenClaw CLI.');
+      process.exit(1);
+    }
+
+    console.warn('[generate] Falling back to placeholder data with metadata marker.');
+    return withMeta(placeholderData, {
+      source: 'placeholder-fallback',
+      isFallback: true,
+      reason: 'missing-openclaw-cli',
+    });
   }
 
   console.log(`[generate] ✓ OpenClaw binary found, proceeding with live data fetch...`);
@@ -94,7 +115,7 @@ function generateData() {
     console.log('[generate] ✗ Could not fetch cron jobs, using placeholder');
   }
 
-  return data;
+  return withMeta(data, { source: 'openclaw-live' });
 }
 
 function processAgents(agents, sessions) {
@@ -166,6 +187,7 @@ console.log(`[generate] ✓ Data written to ${outputPath}`);
 console.log(`[generate]   File size: ${stats.size} bytes`);
 console.log(`[generate]   Agents: ${liveData.agents.length}`);
 console.log(`[generate]   Cron jobs: ${liveData.crons?.jobs?.length ?? 0}`);
+console.log(`[generate] SUMMARY: source=${liveData.__meta?.source ?? 'unknown'} fallback=${liveData.__meta?.isFallback === true ? 'yes' : 'no'} generatedAt=${liveData.__meta?.generatedAt ?? 'unknown'}`);
 console.log('[generate] ');
 console.log('[generate] IMPORTANT: Post-build step (copy-data-to-build.js) will copy this to .next/server/');
 console.log('[generate] This ensures the API route can access the data on Netlify and in production.');
