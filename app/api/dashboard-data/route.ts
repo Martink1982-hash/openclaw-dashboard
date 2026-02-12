@@ -8,6 +8,18 @@ import placeholderData from "@/data/dashboard-data.json";
 
 type DashboardData = typeof placeholderData;
 
+type SnapshotMetadata = {
+  generatedAt?: string;
+  generatedBy?: string;
+  source?: string;
+  isFallback?: boolean;
+  details?: string;
+};
+
+type SnapshotPayload = DashboardData & {
+  metadata?: SnapshotMetadata;
+};
+
 type OpenClawAgent = {
   id?: string;
   identityName?: string;
@@ -198,15 +210,21 @@ async function tryLoadPreGeneratedData(): Promise<DashboardData | null> {
       
       console.log(`[dashboard] tryLoadPreGeneratedData: [${context}] ✓ file exists, reading...`);
       const fileContent = await fs.readFile(filePath, "utf-8");
-      const data = JSON.parse(fileContent) as DashboardData;
-      
-      // Validate the data structure
-      if (!data.agents || !Array.isArray(data.agents)) {
+      const payload = JSON.parse(fileContent) as SnapshotPayload;
+
+      // Validate data structure
+      if (!payload.agents || !Array.isArray(payload.agents)) {
         throw new Error("Invalid data structure: missing or invalid agents array");
       }
-      
-      console.log(`[dashboard] tryLoadPreGeneratedData: [${context}] ✓ successfully loaded and parsed (${data.agents.length} agents, ${data.crons?.jobs?.length ?? 0} crons)`);
-      return data;
+
+      // Only trust snapshots explicitly marked as non-fallback.
+      if (payload.metadata?.isFallback !== false) {
+        const fallbackFlag = payload.metadata?.isFallback;
+        throw new Error(`Snapshot metadata isFallback must be false (received: ${String(fallbackFlag)})`);
+      }
+
+      console.log(`[dashboard] tryLoadPreGeneratedData: [${context}] ✓ trusted snapshot loaded (${payload.agents.length} agents, ${payload.crons?.jobs?.length ?? 0} crons, generatedAt=${payload.metadata?.generatedAt ?? "unknown"})`);
+      return payload;
     } catch (error) {
       // File doesn't exist or can't be read, try next path
       const errorMsg = error instanceof Error ? error.message : String(error);

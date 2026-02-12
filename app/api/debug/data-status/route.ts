@@ -9,6 +9,8 @@ type FileStatus = {
   valid: boolean;
   timestamp: string | null;
   sizeBytes: number | null;
+  metadataGeneratedAt?: string | null;
+  metadataIsFallback?: boolean | null;
   error?: string;
 };
 
@@ -22,7 +24,7 @@ async function getFileStatus(filePath: string): Promise<FileStatus> {
   try {
     const stat = await fs.stat(filePath);
     const raw = await fs.readFile(filePath, "utf-8");
-    JSON.parse(raw);
+    const parsed = JSON.parse(raw) as { metadata?: { generatedAt?: string; isFallback?: boolean } };
 
     return {
       path: filePath,
@@ -30,6 +32,8 @@ async function getFileStatus(filePath: string): Promise<FileStatus> {
       valid: true,
       timestamp: stat.mtime.toISOString(),
       sizeBytes: stat.size,
+      metadataGeneratedAt: parsed.metadata?.generatedAt ?? null,
+      metadataIsFallback: typeof parsed.metadata?.isFallback === "boolean" ? parsed.metadata.isFallback : null,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -39,6 +43,8 @@ async function getFileStatus(filePath: string): Promise<FileStatus> {
       valid: false,
       timestamp: null,
       sizeBytes: null,
+      metadataGeneratedAt: null,
+      metadataIsFallback: null,
       error: message,
     };
   }
