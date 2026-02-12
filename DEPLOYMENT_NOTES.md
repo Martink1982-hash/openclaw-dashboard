@@ -77,9 +77,20 @@ npm run generate-data && npm run build
 
 ## Environment Variables
 
-No special environment variables needed. The script auto-detects:
-- OpenClaw binary location: `~/.openclaw/bin/openclaw`
-- Generated data output: `data/generated-data.json`
+No custom environment variables are required, but generation behavior depends on build mode:
+- OpenClaw binary location is auto-detected at `~/.openclaw/bin/openclaw`
+- Generated data output is `data/generated-data.json`
+- In **production builds** (`NODE_ENV=production`), missing OpenClaw CLI is a hard failure and the build exits with code `1`
+- In non-production builds, script writes placeholder data with metadata:
+  - `__meta.source = "placeholder-fallback"`
+  - `__meta.isFallback = true`
+  - `__meta.reason = "missing-openclaw-cli"`
+
+For live data generation in CI/Netlify, the build environment must provide the OpenClaw CLI at the expected path and credentials/context needed for `openclaw agents/sessions/cron` commands.
+
+The generator now emits a one-line summary in logs, e.g.:
+- Live: `[generate] SUMMARY: source=openclaw-live fallback=no ...`
+- Fallback: `[generate] SUMMARY: source=placeholder-fallback fallback=yes ...`
 
 ## Troubleshooting
 
