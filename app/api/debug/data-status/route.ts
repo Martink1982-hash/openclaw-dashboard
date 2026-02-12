@@ -47,6 +47,8 @@ async function getFileStatus(filePath: string): Promise<FileStatus> {
     const isFallback = typeof meta?.isFallback === "boolean" ? meta.isFallback : null;
     if (isFallback === null) {
       rejectionReasons.push(`Missing ${metaSource}.isFallback`);
+    } else if (isFallback) {
+      rejectionReasons.push(`Expected ${metaSource}.isFallback === false, got true`);
     }
 
     const generatedAt = typeof meta?.generatedAt === "string" ? meta.generatedAt : null;

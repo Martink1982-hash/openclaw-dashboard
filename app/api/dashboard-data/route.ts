@@ -76,6 +76,52 @@ const execFileAsync = promisify(execFile);
 const openClawBinary = path.join(os.homedir(), ".openclaw", "bin", "openclaw");
 const PRE_GENERATED_MAX_AGE_HOURS = 24;
 
+function createEmptyDashboardData(): DashboardData {
+  const template = JSON.parse(JSON.stringify(placeholderData)) as DashboardData;
+  return {
+    ...template,
+    agents: [],
+    projects: {
+      status: "unavailable",
+      active: [],
+      recentActivity: [],
+      activityLog: [],
+    },
+    content: {
+      status: "unavailable",
+      items: [],
+    },
+    trading: {
+      availability: "unavailable",
+      status: {
+        dailyStatus: "Unavailable",
+        statusNote: "Live trading data unavailable",
+        completionStatus: "No live data",
+      },
+      qualifiedHorses: [],
+      tradingStats: {
+        matchedRaces: 0,
+        unmatched: 0,
+        profit: 0,
+        liability: 0,
+      },
+      pipelineStages: [],
+    },
+    crons: {
+      status: "unavailable",
+      jobs: [],
+    },
+    calendar: {
+      status: "unavailable",
+      events: [],
+    },
+    fileActivity: {
+      status: "unavailable",
+      files: [],
+    },
+  };
+}
+
 type PreGeneratedMeta = {
   isFallback?: boolean;
   generatedAt?: string;
@@ -136,6 +182,8 @@ function validatePreGeneratedSnapshot(rawData: unknown): ValidationResult {
   const isFallback = typeof meta?.isFallback === "boolean" ? meta.isFallback : null;
   if (isFallback === null) {
     reasons.push(`Missing ${metaSource}.isFallback`);
+  } else if (isFallback) {
+    reasons.push(`Expected ${metaSource}.isFallback === false, got true`);
   }
 
   if (!Array.isArray(data.agents)) {
@@ -169,7 +217,7 @@ try {
   openClawBinaryReady = true;
   console.log(`[dashboard] ✓ OpenClaw binary found at ${openClawBinary}`);
 } catch (error) {
-  console.warn(`[dashboard] ⚠ OpenClaw binary NOT found at ${openClawBinary} - will use pre-generated or placeholder data`);
+  console.warn(`[dashboard] ⚠ OpenClaw binary NOT found at ${openClawBinary} - will use pre-generated or empty live-data state`);
 }
 
 export async function GET() {
@@ -180,8 +228,8 @@ export async function GET() {
     return NextResponse.json(data, { status: 200 });
   } catch (error) {
     console.error("[dashboard] failed to build live data:", formatError(error));
-    console.log("[dashboard] GET /api/dashboard-data returning placeholder");
-    return NextResponse.json(placeholderData, { status: 200 });
+    console.log("[dashboard] GET /api/dashboard-data returning empty data state");
+    return NextResponse.json(createEmptyDashboardData(), { status: 200 });
   }
 }
 
@@ -203,9 +251,9 @@ async function buildLiveData(): Promise<DashboardData> {
   
   console.log("[dashboard] ⚠ Pre-generated data file not found");
   console.log("[dashboard] STEP 2: Attempting fallback to live OpenClaw CLI...");
-  const snapshot = JSON.parse(JSON.stringify(placeholderData)) as DashboardData;
+  const snapshot = createEmptyDashboardData();
 
-  // FALLBACK MODE: Fetch from OpenClaw CLI directly (for local development)
+  // LIVE MODE: Fetch from OpenClaw CLI directly (for local development)
   console.log("[dashboard] Fetching live data from OpenClaw CLI (agents, crons, etc.)");
 
   const [agents, projects, crons, trading] = await Promise.all([
@@ -223,31 +271,31 @@ async function buildLiveData(): Promise<DashboardData> {
   });
 
   if (agents && agents.length > 0) {
-    console.log(`[dashboard] ✓ LIVE: replacing ${snapshot.agents.length} placeholder agents with ${agents.length} real records from OpenClaw CLI`);
+    console.log(`[dashboard] ✓ LIVE: loaded ${agents.length} real agent records from OpenClaw CLI`);
     snapshot.agents = agents;
   } else {
-    console.warn("[dashboard] ⚠ live agents data unavailable, keeping placeholder");
+    console.warn("[dashboard] ⚠ live agents data unavailable, leaving agents empty");
   }
 
   if (projects && projects.active.length > 0) {
     console.log(`[dashboard] ✓ LIVE: injecting ${projects.active.length} GitHub projects`);
     snapshot.projects = projects;
   } else {
-    console.warn("[dashboard] ⚠ GitHub projects unavailable, keeping placeholder");
+    console.warn("[dashboard] ⚠ GitHub projects unavailable, leaving projects empty");
   }
 
   if (crons && crons.jobs.length > 0) {
     console.log(`[dashboard] ✓ LIVE: replacing cron list with ${crons.jobs.length} real entries from OpenClaw CLI`);
     snapshot.crons = crons;
   } else {
-    console.warn("[dashboard] ⚠ live cron data unavailable, keeping placeholder");
+    console.warn("[dashboard] ⚠ live cron data unavailable, leaving crons empty");
   }
 
   if (trading) {
     console.log(`[dashboard] ✓ LIVE: trading section updated with ${trading.qualifiedHorses?.length ?? 0} horses`);
     snapshot.trading = trading;
   } else {
-    console.warn("[dashboard] ⚠ trading data unavailable, keeping placeholder");
+    console.warn("[dashboard] ⚠ trading data unavailable, leaving trading empty");
   }
 
   const liveDataApplied = Boolean(agents || projects || crons || trading);
@@ -255,7 +303,7 @@ async function buildLiveData(): Promise<DashboardData> {
   
   if (!liveDataApplied) {
     console.log("[dashboard] ⚠ WARNING: No live data sources available");
-    console.log("[dashboard] Using placeholder data - dashboard will show static/demo data");
+    console.log("[dashboard] No live data sources available - returning empty dashboard sections");
     console.log("[dashboard] To fix:");
     console.log("[dashboard]   1. Ensure scripts/generate-live-data.js runs at build time");
     console.log("[dashboard]   2. Check that OpenClaw binary is available at ~/.openclaw/bin/openclaw");

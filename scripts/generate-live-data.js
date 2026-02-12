@@ -13,10 +13,55 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const placeholderData = require('../data/dashboard-data.json');
+const dashboardTemplate = require('../data/dashboard-data.json');
 
 const openclawBinary = path.join(os.homedir(), '.openclaw', 'bin', 'openclaw');
 const requireLiveData = String(process.env.REQUIRE_LIVE_DATA || '').toLowerCase() === 'true';
+
+function createEmptySnapshot() {
+  return {
+    ...JSON.parse(JSON.stringify(dashboardTemplate)),
+    agents: [],
+    projects: {
+      status: 'unavailable',
+      active: [],
+      recentActivity: [],
+      activityLog: [],
+    },
+    content: {
+      status: 'unavailable',
+      items: [],
+    },
+    trading: {
+      availability: 'unavailable',
+      status: {
+        dailyStatus: 'Unavailable',
+        statusNote: 'Live trading data unavailable',
+        completionStatus: 'No live data',
+      },
+      qualifiedHorses: [],
+      tradingStats: {
+        matchedRaces: 0,
+        unmatched: 0,
+        profit: 0,
+        liability: 0,
+      },
+      pipelineStages: [],
+    },
+    crons: {
+      status: 'unavailable',
+      jobs: [],
+    },
+    calendar: {
+      status: 'unavailable',
+      events: [],
+    },
+    fileActivity: {
+      status: 'unavailable',
+      files: [],
+    },
+  };
+}
 
 function runCommand(cmd, label) {
   try {
@@ -134,16 +179,16 @@ function generateData() {
     console.warn(`[generate] ${message}`);
     console.warn('[generate] Writing fallback snapshot data.');
     return withMetadata(
-      JSON.parse(JSON.stringify(placeholderData)),
+      createEmptySnapshot(),
       createMetadata({
         isFallback: true,
-        source: 'placeholder',
-        details: 'openclaw binary unavailable',
+        source: 'empty-fallback',
+        details: 'openclaw binary unavailable; emitted empty snapshot',
       }),
     );
   }
 
-  const data = JSON.parse(JSON.stringify(placeholderData));
+  const data = createEmptySnapshot();
 
   console.log('[generate] Fetching agents and sessions...');
   const agents = runCommand(`${openclawBinary} agents list --json`, 'agents list');
@@ -176,7 +221,7 @@ function generateData() {
       isFallback,
       source: isFallback ? 'mixed' : 'openclaw-cli',
       details: isFallback
-        ? 'partial live data; unresolved sections kept from placeholder'
+        ? 'partial live data; unresolved sections are empty'
         : 'live agents+sessions+cron captured from openclaw cli',
     }),
   );
