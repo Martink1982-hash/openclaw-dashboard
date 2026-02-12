@@ -29,6 +29,7 @@ async function getFileStatus(filePath: string): Promise<FileStatus> {
     const stat = await fs.stat(filePath);
     const raw = await fs.readFile(filePath, "utf-8");
     const parsed = JSON.parse(raw) as {
+      metadata?: { isFallback?: boolean; generatedAt?: string };
       __meta?: { isFallback?: boolean; generatedAt?: string };
       agents?: unknown;
       crons?: { jobs?: unknown };
@@ -37,26 +38,29 @@ async function getFileStatus(filePath: string): Promise<FileStatus> {
 
     const rejectionReasons: string[] = [];
 
-    const meta = parsed.__meta;
+    const meta = parsed.__meta ?? parsed.metadata;
+    const metaSource = parsed.__meta ? "__meta" : parsed.metadata ? "metadata" : "none";
     if (!meta || typeof meta !== "object") {
-      rejectionReasons.push("Missing __meta block");
+      rejectionReasons.push("Missing metadata block (__meta or metadata)");
     }
 
     const isFallback = typeof meta?.isFallback === "boolean" ? meta.isFallback : null;
-    if (isFallback !== false) {
-      rejectionReasons.push(`Expected __meta.isFallback === false, got ${String(meta?.isFallback)}`);
+    if (isFallback === null) {
+      rejectionReasons.push(`Missing ${metaSource}.isFallback`);
+    } else if (isFallback) {
+      rejectionReasons.push(`Expected ${metaSource}.isFallback === false, got true`);
     }
 
     const generatedAt = typeof meta?.generatedAt === "string" ? meta.generatedAt : null;
     if (!generatedAt) {
-      rejectionReasons.push("Missing __meta.generatedAt");
+      rejectionReasons.push(`Missing ${metaSource}.generatedAt`);
     }
 
     let ageHours: number | null = null;
     if (generatedAt) {
       const generatedTime = new Date(generatedAt).getTime();
       if (!Number.isFinite(generatedTime)) {
-        rejectionReasons.push(`Invalid __meta.generatedAt timestamp: ${generatedAt}`);
+        rejectionReasons.push(`Invalid ${metaSource}.generatedAt timestamp: ${generatedAt}`);
       } else {
         ageHours = (Date.now() - generatedTime) / (1000 * 60 * 60);
         if (ageHours > PRE_GENERATED_MAX_AGE_HOURS) {
