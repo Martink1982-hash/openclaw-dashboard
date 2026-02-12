@@ -62,6 +62,90 @@ const formatError = (error: unknown) => {
 
 const execFileAsync = promisify(execFile);
 const openClawBinary = path.join(os.homedir(), ".openclaw", "bin", "openclaw");
+const PRE_GENERATED_MAX_AGE_HOURS = 24;
+
+type PreGeneratedMeta = {
+  isFallback?: boolean;
+  generatedAt?: string;
+};
+
+type PreGeneratedCandidate = DashboardData & {
+  __meta?: PreGeneratedMeta;
+};
+
+type ValidationResult = {
+  valid: boolean;
+  reasons: string[];
+  generatedAt: string | null;
+  ageHours: number | null;
+};
+
+function validatePreGeneratedSnapshot(rawData: unknown): ValidationResult {
+  const reasons: string[] = [];
+
+  if (!rawData || typeof rawData !== "object") {
+    return {
+      valid: false,
+      reasons: ["Snapshot is not a JSON object"],
+      generatedAt: null,
+      ageHours: null,
+    };
+  }
+
+  const data = rawData as PreGeneratedCandidate;
+  const meta = data.__meta;
+
+  if (!meta || typeof meta !== "object") {
+    reasons.push("Missing __meta block");
+  }
+
+  if (meta?.isFallback !== false) {
+    reasons.push(`Expected __meta.isFallback === false, got ${String(meta?.isFallback)}`);
+  }
+
+  const generatedAt = typeof meta?.generatedAt === "string" ? meta.generatedAt : null;
+  if (!generatedAt) {
+    reasons.push("Missing __meta.generatedAt");
+  }
+
+  let ageHours: number | null = null;
+  if (generatedAt) {
+    const generatedTime = new Date(generatedAt).getTime();
+    if (!Number.isFinite(generatedTime)) {
+      reasons.push(`Invalid __meta.generatedAt timestamp: ${generatedAt}`);
+    } else {
+      ageHours = (Date.now() - generatedTime) / (1000 * 60 * 60);
+      if (ageHours > PRE_GENERATED_MAX_AGE_HOURS) {
+        reasons.push(
+          `Snapshot is stale (${ageHours.toFixed(2)}h old, max ${PRE_GENERATED_MAX_AGE_HOURS}h)`,
+        );
+      }
+    }
+  }
+
+  if (!Array.isArray(data.agents)) {
+    reasons.push("Missing or invalid agents array");
+  }
+
+  if (!data.crons || typeof data.crons !== "object" || !Array.isArray(data.crons.jobs)) {
+    reasons.push("Missing or invalid crons.jobs array");
+  }
+
+  const projectsStatus = data.projects?.status;
+  if (
+    projectsStatus !== undefined
+    && (typeof projectsStatus !== "string" || projectsStatus.trim().length === 0)
+  ) {
+    reasons.push("Invalid projects.status (must be a non-empty string when present)");
+  }
+
+  return {
+    valid: reasons.length === 0,
+    reasons,
+    generatedAt,
+    ageHours,
+  };
+}
 
 // Verify OpenClaw binary exists at startup
 let openClawBinaryReady = false;
@@ -198,14 +282,19 @@ async function tryLoadPreGeneratedData(): Promise<DashboardData | null> {
       
       console.log(`[dashboard] tryLoadPreGeneratedData: [${context}] ✓ file exists, reading...`);
       const fileContent = await fs.readFile(filePath, "utf-8");
-      const data = JSON.parse(fileContent) as DashboardData;
-      
-      // Validate the data structure
-      if (!data.agents || !Array.isArray(data.agents)) {
-        throw new Error("Invalid data structure: missing or invalid agents array");
+      const data = JSON.parse(fileContent) as PreGeneratedCandidate;
+      const validation = validatePreGeneratedSnapshot(data);
+
+      if (!validation.valid) {
+        console.warn(
+          `[dashboard] tryLoadPreGeneratedData: [${context}] rejected (${validation.reasons.join("; ")})`,
+        );
+        continue;
       }
-      
-      console.log(`[dashboard] tryLoadPreGeneratedData: [${context}] ✓ successfully loaded and parsed (${data.agents.length} agents, ${data.crons?.jobs?.length ?? 0} crons)`);
+
+      console.log(
+        `[dashboard] tryLoadPreGeneratedData: [${context}] ✓ successfully loaded and validated (${data.agents.length} agents, ${data.crons?.jobs?.length ?? 0} crons, generatedAt=${validation.generatedAt}, ageHours=${validation.ageHours?.toFixed(2) ?? "n/a"})`,
+      );
       return data;
     } catch (error) {
       // File doesn't exist or can't be read, try next path
