@@ -1,5 +1,5 @@
 [build]
-command = "npm run generate-data && npm run build"
+command = "if [ \"${NETLIFY_ENABLE_GENERATE_DATA:-false}\" = \"true\" ]; then npm run generate-data; else echo '[netlify] skipping generate-data (set NETLIFY_ENABLE_GENERATE_DATA=true to enable)'; fi && npm run build"
 publish = ".next"
 functions = "netlify/functions"
 

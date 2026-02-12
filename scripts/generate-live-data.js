@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 /**
- * Generate live OpenClaw data for the dashboard
- * Runs before the Netlify build to capture current state
- * Falls back to placeholder data if commands fail
+ * Generate OpenClaw snapshot data.
+ *
+ * - On trusted machines/CI (with OpenClaw CLI), this writes a live snapshot.
+ * - In constrained environments, it can write fallback placeholder data with metadata.
+ * - If REQUIRE_LIVE_DATA=true, generation fails when live data is unavailable.
  */
 
 const { execSync } = require('child_process');
@@ -13,40 +15,40 @@ const os = require('os');
 
 const placeholderData = require('../data/dashboard-data.json');
 
+const openclawBinary = path.join(os.homedir(), '.openclaw', 'bin', 'openclaw');
+const requireLiveData = String(process.env.REQUIRE_LIVE_DATA || '').toLowerCase() === 'true';
+
 function runCommand(cmd, label) {
   try {
     console.log(`[generate] Running: ${cmd}`);
     const output = execSync(cmd, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
-    
-    // Find JSON in output (may have debug logs before it)
+
     const lines = output.trim().split('\n');
     let jsonStr = '';
     let inJson = false;
     let depth = 0;
-    
+
     for (const line of lines) {
       const trimmed = line.trim();
       if (!inJson && (trimmed.startsWith('[') || trimmed.startsWith('{'))) {
         inJson = true;
       }
-      
+
       if (inJson) {
-        jsonStr += line + '\n';
-        // Count braces to find complete JSON
+        jsonStr += `${line}\n`;
         for (const char of line) {
-          if (char === '[' || char === '{') depth++;
-          if (char === ']' || char === '}') depth--;
+          if (char === '[' || char === '{') depth += 1;
+          if (char === ']' || char === '}') depth -= 1;
         }
-        // If we've found complete JSON, stop
         if (depth === 0 && jsonStr.trim().length > 0) break;
       }
     }
-    
+
     if (!jsonStr.trim()) {
       console.warn(`[generate] ${label}: No JSON found in output`);
       return null;
     }
-    
+
     return JSON.parse(jsonStr);
   } catch (error) {
     console.warn(`[generate] ${label} failed:`, error instanceof Error ? error.message : error);
@@ -54,61 +56,33 @@ function runCommand(cmd, label) {
   }
 }
 
-function generateData() {
-  const openclawBinary = path.join(os.homedir(), '.openclaw', 'bin', 'openclaw');
-  
-  console.log(`[generate] ========== generateData START ==========`);
-  console.log(`[generate] OpenClaw binary path: ${openclawBinary}`);
-  
-  if (!fs.existsSync(openclawBinary)) {
-    console.warn(`[generate] ✗ OpenClaw binary NOT FOUND at ${openclawBinary}`);
-    console.log('[generate] This script runs at build time and needs access to the local OpenClaw CLI.');
-    console.log('[generate] If running on Netlify, OpenClaw is not available in the build environment.');
-    console.log('[generate] Fallback: Using placeholder data (this is expected on Netlify)');
-    return placeholderData;
-  }
+function createMetadata({ isFallback, source, details }) {
+  return {
+    generatedAt: new Date().toISOString(),
+    generatedBy: 'scripts/generate-live-data.js',
+    source,
+    isFallback,
+    details,
+  };
+}
 
-  console.log(`[generate] ✓ OpenClaw binary found, proceeding with live data fetch...`);
-  const data = JSON.parse(JSON.stringify(placeholderData));
-
-  // Fetch agents and sessions
-  console.log('[generate] Fetching agents and sessions...');
-  const agents = runCommand(`${openclawBinary} agents list --json`, 'agents list');
-  const sessions = runCommand(`${openclawBinary} sessions list --json`, 'sessions list');
-
-  if (agents && agents.length) {
-    data.agents = processAgents(agents, sessions);
-    console.log(`[generate] ✓ Fetched ${data.agents.length} agents`);
-  } else {
-    console.log('[generate] ✗ Could not fetch agents, using placeholder');
-  }
-
-  // Fetch cron jobs
-  console.log('[generate] Fetching cron jobs...');
-  const cronResponse = runCommand(`${openclawBinary} cron list --json`, 'cron list');
-  
-  if (cronResponse && cronResponse.jobs) {
-    data.crons = processCrons(cronResponse.jobs);
-    console.log(`[generate] ✓ Fetched ${data.crons.jobs.length} cron jobs`);
-  } else {
-    console.log('[generate] ✗ Could not fetch cron jobs, using placeholder');
-  }
-
-  return data;
+function withMetadata(data, metadata) {
+  return {
+    ...data,
+    metadata,
+  };
 }
 
 function processAgents(agents, sessions) {
   const sessionsData = sessions?.sessions || [];
-  
-  return agents.map(agent => {
+
+  return agents.map((agent) => {
     const prefix = `agent:${agent.id}:`;
-    const agentSessions = sessionsData.filter(s => 
-      typeof s.key === 'string' && s.key.startsWith(prefix)
-    );
-    
+    const agentSessions = sessionsData.filter((s) => typeof s.key === 'string' && s.key.startsWith(prefix));
+
     const tokens = agentSessions.reduce((total, session) => {
-      const value = typeof session.totalTokens === 'number' 
-        ? session.totalTokens 
+      const value = typeof session.totalTokens === 'number'
+        ? session.totalTokens
         : session.outputTokens ?? 0;
       return total + (typeof value === 'number' ? value : Number(value) || 0);
     }, 0);
@@ -128,46 +102,90 @@ function processAgents(agents, sessions) {
 function processCrons(jobs) {
   return {
     status: 'available',
-    jobs: jobs.map(job => {
+    jobs: jobs.map((job) => {
       const state = job.state ?? {};
       const name = job.name || job.payload?.name || job.payload?.text || job.id || 'Unnamed cron';
       const status = state.lastStatus || state.status || 'unknown';
       const nextRun = formatTimestamp(state.nextRunAtMs ?? state.next_run);
       const lastRun = formatTimestamp(state.lastRunAtMs ?? state.last_run ?? state.lastRun);
 
-      return {
-        name,
-        status,
-        nextRun,
-        lastRun,
-      };
+      return { name, status, nextRun, lastRun };
     }),
   };
 }
 
 function formatTimestamp(value) {
-  if (typeof value === 'number' && !Number.isNaN(value)) {
-    return new Date(value).toISOString();
-  }
-  if (typeof value === 'string' && value.trim()) {
-    return value;
-  }
+  if (typeof value === 'number' && !Number.isNaN(value)) return new Date(value).toISOString();
+  if (typeof value === 'string' && value.trim()) return value;
   return 'Unknown';
 }
 
-// Main execution
-const outputPath = path.join(__dirname, '../data/generated-data.json');
-console.log(`[generate] Generating data now...`);
-const liveData = generateData();
+function generateData() {
+  console.log('[generate] ========== generateData START ==========');
+  console.log(`[generate] OpenClaw binary path: ${openclawBinary}`);
 
-fs.writeFileSync(outputPath, JSON.stringify(liveData, null, 2), 'utf-8');
+  if (!fs.existsSync(openclawBinary)) {
+    const message = `OpenClaw binary not found at ${openclawBinary}`;
+    if (requireLiveData) {
+      throw new Error(`${message}. REQUIRE_LIVE_DATA=true prevents fallback snapshots.`);
+    }
+
+    console.warn(`[generate] ${message}`);
+    console.warn('[generate] Writing fallback snapshot data.');
+    return withMetadata(
+      JSON.parse(JSON.stringify(placeholderData)),
+      createMetadata({
+        isFallback: true,
+        source: 'placeholder',
+        details: 'openclaw binary unavailable',
+      }),
+    );
+  }
+
+  const data = JSON.parse(JSON.stringify(placeholderData));
+
+  console.log('[generate] Fetching agents and sessions...');
+  const agents = runCommand(`${openclawBinary} agents list --json`, 'agents list');
+  const sessions = runCommand(`${openclawBinary} sessions list --json`, 'sessions list');
+
+  console.log('[generate] Fetching cron jobs...');
+  const cronResponse = runCommand(`${openclawBinary} cron list --json`, 'cron list');
+
+  const agentsReady = Boolean(agents && Array.isArray(agents) && agents.length > 0);
+  const cronsReady = Boolean(cronResponse && Array.isArray(cronResponse.jobs));
+
+  if (agentsReady) {
+    data.agents = processAgents(agents, sessions);
+    console.log(`[generate] ✓ Fetched ${data.agents.length} agents`);
+  }
+
+  if (cronsReady) {
+    data.crons = processCrons(cronResponse.jobs);
+    console.log(`[generate] ✓ Fetched ${data.crons.jobs.length} cron jobs`);
+  }
+
+  const isFallback = !(agentsReady && cronsReady);
+  if (isFallback && requireLiveData) {
+    throw new Error('Live snapshot incomplete (missing agents or crons). REQUIRE_LIVE_DATA=true prevents fallback snapshots.');
+  }
+
+  return withMetadata(
+    data,
+    createMetadata({
+      isFallback,
+      source: isFallback ? 'mixed' : 'openclaw-cli',
+      details: isFallback
+        ? 'partial live data; unresolved sections kept from placeholder'
+        : 'live agents+sessions+cron captured from openclaw cli',
+    }),
+  );
+}
+
+const outputPath = path.join(__dirname, '../data/generated-data.json');
+const snapshot = generateData();
+
+fs.writeFileSync(outputPath, JSON.stringify(snapshot, null, 2), 'utf-8');
 const stats = fs.statSync(outputPath);
 console.log(`[generate] ✓ Data written to ${outputPath}`);
 console.log(`[generate]   File size: ${stats.size} bytes`);
-console.log(`[generate]   Agents: ${liveData.agents.length}`);
-console.log(`[generate]   Cron jobs: ${liveData.crons?.jobs?.length ?? 0}`);
-console.log('[generate] ');
-console.log('[generate] IMPORTANT: Post-build step (copy-data-to-build.js) will copy this to .next/server/');
-console.log('[generate] This ensures the API route can access the data on Netlify and in production.');
-console.log('[generate] ');
-console.log('[generate] ========== generateData COMPLETE ==========');
+console.log(`[generate]   Metadata: isFallback=${snapshot?.metadata?.isFallback}, generatedAt=${snapshot?.metadata?.generatedAt}`);

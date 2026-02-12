@@ -8,6 +8,18 @@ import placeholderData from "@/data/dashboard-data.json";
 
 type DashboardData = typeof placeholderData;
 
+type SnapshotMetadata = {
+  generatedAt?: string;
+  generatedBy?: string;
+  source?: string;
+  isFallback?: boolean;
+  details?: string;
+};
+
+type SnapshotPayload = DashboardData & {
+  metadata?: SnapshotMetadata;
+};
+
 type OpenClawAgent = {
   id?: string;
   identityName?: string;
